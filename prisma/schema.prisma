@@ -1,0 +1,357 @@
+// Mielesy Platform — schema.prisma v2.0
+// G3 FIX: trust_score has full event-sourced calculation spec
+// G4 FIX: many-to-many UserLane junction (was single lane_id FK)
+// G5 FIX: credit ledger only — no real P2P Stripe transfers
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MembershipTier {
+  EXPLORER
+  MEMBER
+  VIP
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum LaneName {
+  DATING
+  NETWORKING
+  FRIENDS
+  ACTIVITY_PARTNERS
+}
+
+enum LaneMemberStatus {
+  ACTIVE
+  SUSPENDED
+  LEFT
+}
+
+enum GiftStatus {
+  PENDING
+  DELIVERED
+  REDEEMED
+  EXPIRED
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  SOLD_OUT
+  CANCELLED
+  COMPLETED
+}
+
+enum TicketStatus {
+  RESERVED
+  PAID
+  ATTENDED
+  NO_SHOW
+  REFUNDED
+}
+
+enum TrustEventType {
+  IDENTITY_VERIFIED
+  PHONE_VERIFIED
+  PROFILE_COMPLETED
+  EVENT_ATTENDED
+  GIFT_SENT
+  REPORT_RECEIVED
+  NO_SHOW_EVENT
+  WARNING_ISSUED
+  MANUAL_ADJUSTMENT
+}
+
+enum NotificationType {
+  MESSAGE
+  GIFT_RECEIVED
+  EVENT_REMINDER
+  EVENT_INVITE
+  TRUST_SCORE_CHANGE
+  SYSTEM
+}
+
+enum CreditTransactionType {
+  PURCHASE
+  GIFT_SENT
+  GIFT_RECEIVED
+  REDEMPTION
+  REFUND
+  ADMIN_ADJUSTMENT
+}
+
+model User {
+  id                   String         @id @default(cuid())
+  clerkId              String         @unique
+  email                String         @unique
+  username             String         @unique
+  displayName          String
+  bio                  String?        @db.Text
+  location             String?
+  age                  Int?
+  photoUrls            String[]
+  primaryPhotoUrl      String?
+  isIdentityVerified   Boolean        @default(false)
+  isPhoneVerified      Boolean        @default(false)
+  isProfileComplete    Boolean        @default(false)
+  trustScore           Float          @default(50.0)
+  trustBadge           String?
+  membershipTier       MembershipTier @default(EXPLORER)
+  membershipExpiresAt  DateTime?
+  status               UserStatus     @default(PENDING_VERIFICATION)
+  language             String         @default("es")
+  creditBalance        Int            @default(0)
+  stripeCustomerId     String?        @unique
+  stripeSubscriptionId String?        @unique
+  invitedById          String?
+  invitedBy            User?          @relation("Invitations", fields: [invitedById], references: [id])
+  invitations          User[]         @relation("Invitations")
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  lanes                UserLane[]
+  sentMessages         Message[]              @relation("SentMessages")
+  receivedMessages     Message[]              @relation("ReceivedMessages")
+  sentGifts            Gift[]                 @relation("SentGifts")
+  receivedGifts        Gift[]                 @relation("ReceivedGifts")
+  tickets              Ticket[]
+  eventsCreated        Event[]                @relation("EventCreator")
+  reportsFiledBy       Report[]               @relation("Reporter")
+  reportsAgainst       Report[]               @relation("Reported")
+  trustEvents          TrustEvent[]
+  notifications        Notification[]
+  creditTransactions   CreditTransaction[]
+  waitlistEntry        WaitlistEntry?
+
+  @@index([trustScore])
+  @@index([membershipTier])
+  @@index([status])
+}
+
+model Lane {
+  id            String         @id @default(cuid())
+  name          LaneName       @unique
+  displayName   String
+  description   String
+  displayNameEs String
+  descriptionEs String
+  minTrust      Float          @default(0)
+  minTier       MembershipTier @default(EXPLORER)
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+
+  members       UserLane[]
+  events        Event[]
+}
+
+model UserLane {
+  id            String           @id @default(cuid())
+  userId        String
+  laneId        String
+  status        LaneMemberStatus @default(ACTIVE)
+  joinedAt      DateTime         @default(now())
+  leftAt        DateTime?
+  cooldownUntil DateTime?
+
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lane          Lane             @relation(fields: [laneId], references: [id])
+
+  @@unique([userId, laneId])
+  @@index([userId])
+  @@index([laneId])
+}
+
+model TrustEvent {
+  id          String         @id @default(cuid())
+  userId      String
+  type        TrustEventType
+  delta       Float
+  scoreBefore Float
+  scoreAfter  Float
+  reason      String?
+  refId       String?
+  createdAt   DateTime       @default(now())
+  createdBy   String?
+
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([type])
+}
+
+model CreditTransaction {
+  id            String                @id @default(cuid())
+  userId        String
+  type          CreditTransactionType
+  amount        Int
+  balanceBefore Int
+  balanceAfter  Int
+  description   String?
+  refId         String?
+  createdAt     DateTime              @default(now())
+
+  user          User                  @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model Gift {
+  id           String     @id @default(cuid())
+  senderId     String
+  recipientId  String
+  creditAmount Int
+  message      String?    @db.Text
+  status       GiftStatus @default(PENDING)
+  sentAt       DateTime   @default(now())
+  deliveredAt  DateTime?
+  redeemedAt   DateTime?
+  expiresAt    DateTime
+
+  sender       User       @relation("SentGifts", fields: [senderId], references: [id])
+  recipient    User       @relation("ReceivedGifts", fields: [recipientId], references: [id])
+
+  @@index([senderId])
+  @@index([recipientId])
+}
+
+model Message {
+  id          String   @id @default(cuid())
+  senderId    String
+  recipientId String
+  laneId      String?
+  content     String   @db.Text
+  isRead      Boolean  @default(false)
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  sender      User     @relation("SentMessages", fields: [senderId], references: [id])
+  recipient   User     @relation("ReceivedMessages", fields: [recipientId], references: [id])
+
+  @@index([senderId])
+  @@index([recipientId])
+}
+
+model Event {
+  id            String         @id @default(cuid())
+  title         String
+  titleEs       String
+  description   String         @db.Text
+  descriptionEs String         @db.Text
+  location      String
+  locationUrl   String?
+  startsAt      DateTime
+  endsAt        DateTime
+  capacity      Int
+  ticketPrice   Int            @default(0)
+  minTier       MembershipTier @default(EXPLORER)
+  minTrust      Float          @default(0)
+  laneId        String?
+  creatorId     String
+  status        EventStatus    @default(DRAFT)
+  imageUrl      String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  creator       User           @relation("EventCreator", fields: [creatorId], references: [id])
+  lane          Lane?          @relation(fields: [laneId], references: [id])
+  tickets       Ticket[]
+
+  @@index([startsAt])
+  @@index([status])
+}
+
+model Ticket {
+  id              String       @id @default(cuid())
+  userId          String
+  eventId         String
+  status          TicketStatus @default(RESERVED)
+  stripePaymentId String?
+  purchasedAt     DateTime     @default(now())
+  attendedAt      DateTime?
+
+  user            User         @relation(fields: [userId], references: [id])
+  event           Event        @relation(fields: [eventId], references: [id])
+
+  @@unique([userId, eventId])
+  @@index([userId])
+  @@index([eventId])
+}
+
+model Report {
+  id          String   @id @default(cuid())
+  reporterId  String
+  reportedId  String
+  reason      String
+  details     String?  @db.Text
+  resolved    Boolean  @default(false)
+  resolution  String?
+  resolvedBy  String?
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+
+  reporter    User     @relation("Reporter", fields: [reporterId], references: [id])
+  reported    User     @relation("Reported", fields: [reportedId], references: [id])
+
+  @@index([reportedId])
+  @@index([resolved])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  titleEs   String
+  body      String
+  bodyEs    String
+  isRead    Boolean          @default(false)
+  refId     String?
+  createdAt DateTime         @default(now())
+  readAt    DateTime?
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+}
+
+model WaitlistEntry {
+  id          String   @id @default(cuid())
+  userId      String?  @unique
+  email       String   @unique
+  name        String
+  location    String?
+  tier        String   @default("MEMBER")
+  message     String?  @db.Text
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  inviteCode  String?
+  approved    Boolean  @default(false)
+  approvedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  user        User?    @relation(fields: [userId], references: [id])
+}
+
+model StripeEvent {
+  id          String   @id
+  type        String
+  processed   Boolean  @default(false)
+  processedAt DateTime?
+  error       String?
+  payload     Json
+  createdAt   DateTime @default(now())
+
+  @@index([type, processed])
+}
