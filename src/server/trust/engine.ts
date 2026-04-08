@@ -1,20 +1,23 @@
 // src/server/trust/engine.ts
-// G3 FIX: Trust score calculation with full event sourcing
+// CORRECTED against Master Blueprint v2.0
+// G3 FIX: trust_score event-sourced — delta values from blueprint §3.2
 
 import { db } from "../db"
 import { TrustEventType, NotificationType } from "@prisma/client"
 import { notify } from "../sonic/notify"
 
 const TRUST_DELTAS: Record<TrustEventType, number> = {
-  IDENTITY_VERIFIED:  20,
-  PHONE_VERIFIED:     10,
-  PROFILE_COMPLETED:  5,
-  EVENT_ATTENDED:     5,
-  GIFT_SENT:          3,
-  REPORT_RECEIVED:   -15,
-  NO_SHOW_EVENT:     -8,
-  WARNING_ISSUED:    -10,
-  MANUAL_ADJUSTMENT:  0, // delta provided explicitly
+  IDENTITY_VERIFIED:   20,  // blueprint: +20
+  PHONE_VERIFIED:      10,  // blueprint: +10
+  PROFILE_COMPLETED:    5,  // blueprint: (implied)
+  EVENT_ATTENDED:       5,  // blueprint: +5, capped +25/year
+  GIFT_SENT:            2,  // blueprint: +2 per UNIQUE recipient, capped +10/year (was +3, fixed)
+  REPORT_RECEIVED:    -20,  // blueprint: -20 (was -15, fixed)
+  NO_SHOW_EVENT:      -10,  // blueprint: -10 (was -8, fixed)
+  WARNING_ISSUED:     -10,  // blueprint: (implied admin action)
+  CHARGEBACK_FILED:   -25,  // blueprint: -25 — new, added from blueprint §3.2
+  INACTIVITY_90_DAYS:  -5,  // blueprint: -5 (new — scheduled job)
+  MANUAL_ADJUSTMENT:    0,  // delta provided explicitly
 }
 
 export function scoreToBadge(score: number): string {
@@ -60,7 +63,6 @@ export async function applyTrustEvent(
     }),
   ])
 
-  // Notify user if badge changed
   if (scoreToBadge(scoreBefore) !== badge) {
     await notify(userId, NotificationType.TRUST_SCORE_CHANGE, {
       badge,
