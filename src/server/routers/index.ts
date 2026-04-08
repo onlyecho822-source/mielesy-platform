@@ -1,6 +1,4 @@
 // src/server/routers/index.ts
-// Main tRPC router — all domain routers composed here
-
 import { router } from "../trpc"
 import { userRouter } from "./user"
 import { laneRouter } from "./lane"
@@ -9,6 +7,7 @@ import { eventRouter } from "./event"
 import { creditRouter } from "./credit"
 import { notificationRouter } from "./notification"
 import { adminRouter } from "./admin"
+import { waitlistRouter } from "./waitlist"
 
 export const appRouter = router({
   user:         userRouter,
@@ -18,6 +17,7 @@ export const appRouter = router({
   credit:       creditRouter,
   notification: notificationRouter,
   admin:        adminRouter,
+  waitlist:     waitlistRouter,
 })
 
 export type AppRouter = typeof appRouter
