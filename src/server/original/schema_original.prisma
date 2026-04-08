@@ -1,0 +1,123 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  trustScore         Float     @default(50.0)
+  stripeCustomerId   String?   @unique
+  createdAt          DateTime  @default(now())
+  lastActive         DateTime? @updatedAt
+  lanes              UserLane[]
+  eventsAsHost       Event[]
+  tickets            Ticket[]
+  transactions       Transaction[]
+  sentGifts          Gift[]    @relation("sentGifts")
+  receivedGifts      Gift[]    @relation("receivedGifts")
+  orders             Order[]
+}
+
+model Lane {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  description String?
+  isPremium   Boolean    @default(false)
+  users       UserLane[]
+}
+
+model UserLane {
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  lane   Lane   @relation(fields: [laneId], references: [id], onDelete: Cascade)
+  laneId String
+
+  @@id([userId, laneId])
+}
+
+model Event {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  date        DateTime
+  location    String
+  capacity    Int
+  price       Float
+  host        User     @relation(fields: [hostId], references: [id])
+  hostId      String
+  status      String   @default("draft") // draft, published, cancelled, completed
+  createdAt   DateTime @default(now())
+  tickets     Ticket[]
+
+  @@index([status])
+  @@index([date])
+}
+
+model Ticket {
+  id        String   @id @default(cuid())
+  event     Event    @relation(fields: [eventId], references: [id])
+  eventId   String
+  owner     User     @relation(fields: [ownerId], references: [id])
+  ownerId   String
+  status    String   @default("active") // active, used, cancelled
+  createdAt DateTime @default(now())
+}
+
+model Transaction {
+  id                 String   @id @default(cuid())
+  user               User     @relation(fields: [userId], references: [id])
+  userId             String
+  stripePaymentId    String   @unique
+  amount             Float
+  currency           String
+  type               String   // membership, credits, ticket, etc.
+  status             String   // succeeded, pending, failed
+  createdAt          DateTime @default(now())
+}
+
+model Gift {
+  id          String   @id @default(cuid())
+  sender      User     @relation("sentGifts", fields: [senderId], references: [id])
+  senderId    String
+  recipient   User     @relation("receivedGifts", fields: [recipientId], references: [id])
+  recipientId String
+  credits     Int
+  message     String?
+  createdAt   DateTime @default(now())
+}
+
+model Product {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  price       Float
+  sku         String  @unique
+  inventory   Int
+  orders      OrderLine[]
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  user        User        @relation(fields: [userId], references: [id])
+  userId      String
+  status      String      // pending, processing, shipped, delivered, cancelled
+  total       Float
+  createdAt   DateTime    @default(now())
+  lines       OrderLine[]
+}
+
+model OrderLine {
+  order     Order   @relation(fields: [orderId], references: [id])
+  orderId   String
+  product   Product @relation(fields: [productId], references: [id])
+  productId String
+  quantity  Int
+  price     Float
+
+  @@id([orderId, productId])
+}
